@@ -1,0 +1,59 @@
+# ── Личное: настройки, токен, чаты, карточки, картинки ──
+/data/**
+!/data/README.md
+
+# ── Модели и внешние инструменты: большие, скачиваются и собираются скриптами ──
+/models/**
+!/models/README.md
+!/models/**/
+/tools/**
+!/tools/README.md
+# на случай, если файл модели окажется не в models/
+*.gguf
+*.safetensors
+*.ckpt
+*.pt
+*.pth
+*.bin
+*.onnx
+
+# ── Python ──
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# ── Android ──
+/android/.gradle/
+/android/build/
+/android/app/build/
+/android/local.properties
+/android/.adb-last
+/android/captures/
+/android/.kotlin/
+/android/app/release/
+*.apk
+*.aab
+*.keystore
+*.jks
+
+# ── Среды разработки и система ──
+.idea/
+*.iml
+.vscode/
+.DS_Store
+*.swp
+*~
+
+# ── Личное и временное: токены, чаты, архивы обновлений ──
+
+
+*.db
+*.db-wal
+*.db-shm
+*.log
+*.zip
+*.old/

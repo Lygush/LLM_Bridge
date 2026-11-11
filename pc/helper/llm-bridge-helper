@@ -1,0 +1,91 @@
+#!/bin/bash
+# llm-bridge-helper — привилегированная часть llm-bridge:
+# IP-адрес на интерфейсе группы Wi-Fi Direct и DHCP (dnsmasq).
+# Вызывается через sudo без пароля, поэтому аргументы проверяются строго.
+#
+#   llm-bridge-helper up   IFACE IP DHCP_START DHCP_END
+#   llm-bridge-helper down IFACE IP
+#   llm-bridge-helper status
+set -euo pipefail
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+
+RUN_DIR=/run/llm-bridge
+PID_FILE=$RUN_DIR/dnsmasq.pid
+LEASE_FILE=$RUN_DIR/dnsmasq.leases
+
+die() { echo "llm-bridge-helper: $*" >&2; exit 1; }
+
+valid_iface() {
+    [[ "$1" =~ ^[A-Za-z0-9_.-]{1,15}$ ]] || die "некорректное имя интерфейса: $1"
+    [[ -d "/sys/class/net/$1" ]] || die "интерфейс $1 не найден"
+}
+
+# Только частная сеть 192.168.x.y — helper нельзя использовать для чего-то постороннего
+valid_ip() {
+    [[ "$1" =~ ^192\.168\.([0-9]{1,3})\.([0-9]{1,3})$ ]] || die "адрес должен быть 192.168.x.y: $1"
+    (( BASH_REMATCH[1] <= 255 && BASH_REMATCH[2] >= 1 && BASH_REMATCH[2] <= 254 )) || die "некорректный адрес: $1"
+}
+
+same_net() {  # $1 $2 — одна /24
+    [[ "${1%.*}" == "${2%.*}" ]] || die "$2 не в сети ${1%.*}.0/24"
+}
+
+stop_dnsmasq() {
+    if [[ -f "$PID_FILE" ]]; then
+        local pid
+        pid=$(cat "$PID_FILE" 2>/dev/null || true)
+        if [[ "$pid" =~ ^[0-9]+$ ]] && [[ "$(cat /proc/"$pid"/comm 2>/dev/null)" == "dnsmasq" ]]; then
+            kill "$pid" 2>/dev/null || true
+            for _ in $(seq 20); do
+                kill -0 "$pid" 2>/dev/null || break
+                sleep 0.1
+            done
+        fi
+        rm -f "$PID_FILE"
+    fi
+}
+
+cmd=${1:-}
+case "$cmd" in
+    up)
+        [[ $# -eq 5 ]] || die "использование: up IFACE IP DHCP_START DHCP_END"
+        iface=$2; ip=$3; start=$4; end=$5
+        valid_iface "$iface"; valid_ip "$ip"; valid_ip "$start"; valid_ip "$end"
+        same_net "$ip" "$start"; same_net "$ip" "$end"
+        mkdir -p "$RUN_DIR"; chmod 755 "$RUN_DIR"
+        stop_dnsmasq
+        ip addr replace "$ip/24" dev "$iface"
+        # VPN на ПК (Browsec и т.п.) ставит свою таблицу маршрутов: ответы телефону уходят в туннель,
+        # а входящие пакеты отбрасывает проверка обратного пути. Сеть группы — всегда через main.
+        net="${ip%.*}.0/24"
+        ip rule del to "$net" lookup main priority 50 2>/dev/null || true
+        ip rule add to "$net" lookup main priority 50
+        echo 2 > "/proc/sys/net/ipv4/conf/$iface/rp_filter"   # нестрогая проверка обратного пути
+        # --port=0          — без DNS, не конфликтует с systemd-resolved
+        # dhcp-option=3, 6  — не объявлять шлюз и DNS: телефон не пытается ходить через ПК в интернет
+        dnsmasq --conf-file=/dev/null --port=0 --bind-interfaces --interface="$iface" \
+                --dhcp-range="$start,$end,255.255.255.0,12h" --dhcp-authoritative \
+                --dhcp-option=3 --dhcp-option=6 \
+                --dhcp-leasefile="$LEASE_FILE" --pid-file="$PID_FILE"
+        ;;
+    down)
+        [[ $# -eq 3 ]] || die "использование: down IFACE IP"
+        iface=$2; ip=$3
+        valid_ip "$ip"
+        stop_dnsmasq
+        ip rule del to "${ip%.*}.0/24" lookup main priority 50 2>/dev/null || true
+        if [[ "$iface" =~ ^[A-Za-z0-9_.-]{1,15}$ ]] && [[ -d "/sys/class/net/$iface" ]]; then
+            ip addr del "$ip/24" dev "$iface" 2>/dev/null || true
+        fi
+        ;;
+    status)
+        if [[ -f "$PID_FILE" ]] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
+            echo "dnsmasq: работает (pid $(cat "$PID_FILE"))"
+        else
+            echo "dnsmasq: остановлен"
+        fi
+        ;;
+    *)
+        die "команды: up | down | status"
+        ;;
+esac

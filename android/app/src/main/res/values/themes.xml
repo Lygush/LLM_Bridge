@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- всё оформление в Compose, тема окна нужна только до первого кадра -->
+    <style name="Theme.LlmBridge" parent="android:Theme.Material.Light.NoActionBar" />
+    <color name="ic_launcher_background">#2E5D8A</color>
+</resources>
